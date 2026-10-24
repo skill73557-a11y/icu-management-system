@@ -1,6 +1,8 @@
 import javax.swing.*;
 import java.awt.*;
 import java.sql.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -8,6 +10,7 @@ public class DashboardPanel extends JPanel {
     private final ExecutorService threadPool = Executors.newFixedThreadPool(2);
     private JLabel totalPatientsValue, admittedValue, criticalValue, availableBedsValue, waitingListValue, occupancyValue;
     private JProgressBar occupancyBar;
+    private JLabel liveClock;
 
     public DashboardPanel() {
         setLayout(new BorderLayout(0, 18));
@@ -18,27 +21,37 @@ public class DashboardPanel extends JPanel {
         body.setOpaque(false);
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 
+        // --- HEADER SECTION ---
         JPanel welcome = new JPanel(new BorderLayout(12, 5));
         welcome.setOpaque(false);
+        
         JPanel wt = new JPanel();
         wt.setOpaque(false);
         wt.setLayout(new BoxLayout(wt, BoxLayout.Y_AXIS));
         wt.add(Theme.sectionTitle("Hospital Command Center"));
         wt.add(Box.createVerticalStrut(5));
         wt.add(Theme.mutedLabel("Real-time snapshot of hospital operations."));
+        
+        // --- LIVE CLOCK ---
+        liveClock = new JLabel("Loading time...");
+        liveClock.setForeground(Theme.TEAL);
+        liveClock.setFont(new Font("SansSerif", Font.BOLD, 14));
+        wt.add(Box.createVerticalStrut(8));
+        wt.add(liveClock);
+        
+        // Start the background thread for the clock
+        startClockThread(); 
+        
         welcome.add(wt, BorderLayout.WEST);
         
         JButton reg = Theme.createButton("+ Admit New Patient", Theme.BLUE);
-        // Linking button to PatientsPanel via reflection or just telling user to click Patients tab
         reg.addActionListener(e -> {
             try {
-                // Instantly switch to Patients tab and open dialog
                 Container parent = getParent();
                 if (parent instanceof JPanel) {
                     JPanel content = (JPanel) parent;
                     CardLayout cl = (CardLayout) content.getLayout();
-                    cl.show(content, "1");
-                    // Find PatientsPanel (this is a bit hacky but works for this structure)
+                    cl.show(content, "1"); // Switch to Patients tab
                     for (Component c : content.getComponents()) {
                         if (c instanceof PatientsPanel) {
                             ((PatientsPanel) c).openRegistrationDialog();
@@ -49,9 +62,11 @@ public class DashboardPanel extends JPanel {
             } catch (Exception ex) { ex.printStackTrace(); }
         });
         welcome.add(reg, BorderLayout.EAST);
+        
         body.add(welcome);
         body.add(Box.createVerticalStrut(16));
 
+        // --- METRICS CARDS ---
         JPanel metrics = new JPanel(new GridLayout(1, 5, 12, 12));
         metrics.setOpaque(false);
         totalPatientsValue = new JLabel("—");
@@ -68,8 +83,10 @@ public class DashboardPanel extends JPanel {
         body.add(metrics);
         body.add(Box.createVerticalStrut(16));
 
+        // --- OCCUPANCY & RECENT ---
         JPanel middle = new JPanel(new GridLayout(1, 2, 14, 0));
         middle.setOpaque(false);
+        
         JPanel occupancy = Theme.cardPanel();
         occupancy.setLayout(new BoxLayout(occupancy, BoxLayout.Y_AXIS));
         occupancy.setBorder(BorderFactory.createEmptyBorder(18, 18, 16, 18));
@@ -93,13 +110,34 @@ public class DashboardPanel extends JPanel {
         recent.setBorder(BorderFactory.createEmptyBorder(17, 18, 15, 18));
         recent.add(Theme.sectionTitle("Recent Admissions"), BorderLayout.NORTH);
         
-        middle.add(occupancy); middle.add(recent);
+        middle.add(occupancy); 
+        middle.add(recent);
         middle.setPreferredSize(new Dimension(800, 170));
         middle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 170));
         body.add(middle);
         
         add(body, BorderLayout.NORTH);
         loadData();
+    }
+
+    // --- MULTITHREADING: LIVE CLOCK ---
+    private void startClockThread() {
+        Thread clockThread = new Thread(() -> {
+            SimpleDateFormat sdf = new SimpleDateFormat("EEE, dd MMM yyyy  HH:mm:ss");
+            while (true) {
+                String time = sdf.format(new Date());
+                // Update UI safely from background thread
+                SwingUtilities.invokeLater(() -> liveClock.setText(time));
+                try { 
+                    Thread.sleep(1000); 
+                } catch (InterruptedException e) { 
+                    Thread.currentThread().interrupt(); 
+                    break; 
+                }
+            }
+        });
+        clockThread.setDaemon(true); // Stops when app closes
+        clockThread.start();
     }
 
     private JPanel metricCard(String title, JLabel value, String subtitle, Color accent, String symbol) {
@@ -117,14 +155,18 @@ public class DashboardPanel extends JPanel {
         icon.setOpaque(true);
         icon.setBackground(accent.darker());
         icon.setPreferredSize(new Dimension(32, 32));
-        top.add(name, BorderLayout.CENTER); top.add(icon, BorderLayout.EAST);
+        top.add(name, BorderLayout.CENTER); 
+        top.add(icon, BorderLayout.EAST);
         value.setFont(new Font("SansSerif", Font.BOLD, 30));
         value.setForeground(Theme.TEXT);
         JPanel lower = new JPanel();
         lower.setOpaque(false);
         lower.setLayout(new BoxLayout(lower, BoxLayout.Y_AXIS));
-        lower.add(value); lower.add(Box.createVerticalStrut(5)); lower.add(Theme.mutedLabel(subtitle));
-        card.add(top, BorderLayout.NORTH); card.add(lower, BorderLayout.CENTER);
+        lower.add(value); 
+        lower.add(Box.createVerticalStrut(5)); 
+        lower.add(Theme.mutedLabel(subtitle));
+        card.add(top, BorderLayout.NORTH); 
+        card.add(lower, BorderLayout.CENTER);
         return card;
     }
 
@@ -150,7 +192,9 @@ public class DashboardPanel extends JPanel {
                     occupancyBar.setValue(percent);
                     occupancyBar.setString(percent + "%");
                 });
-            } catch (SQLException ex) { ex.printStackTrace(); }
+            } catch (SQLException ex) { 
+                SwingUtilities.invokeLater(() -> Theme.showError(this, "Dashboard Load Failed", ex)); 
+            }
         });
     }
 
